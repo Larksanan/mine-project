@@ -1,0 +1,63 @@
+name: mini-project-ci
+
+on:
+  # Trigger the workflow on push and pull request events to the main branch
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    # Run on the latest Ubuntu virtual machine
+    runs-on: ubuntu-latest
+    services:
+      mongo: # Match the version used in your docker-compose
+        # Define a MongoDB service for tests that require a database connection
+        image: mongo:6
+        ports:
+          - '27017:27017'
+
+    steps:
+      # Checkout the repository code
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Set up Node.js environment (using version 20 as per your Dockerfile)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          # Cache node_modules to speed up subsequent runs
+          cache-dependency-path: '**/package-lock.json'
+
+      # Wait for the MongoDB service to be fully ready before proceeding
+      - name: Wait for MongoDB to be ready
+        run: |
+          until nc -z localhost 27017; do
+            echo "Waiting for MongoDB to be ready..."
+            sleep 2
+          done
+          echo "MongoDB is ready!"
+
+      - name: Start Nginx
+        run: |
+          docker run -d --name nginx -p 80:80 nginx:stable-alpine
+
+      # Install project dependencies using npm ci for clean and consistent installs
+      - name: Install dependencies (Clean Install)
+        run: npm ci
+
+      # Run the Next.js build process
+      # MONGODB_URI is provided as an environment variable for the build step
+      - name: Run Build
+        run: npm run build
+        env:
+          MONGODB_URI: 'mongodb://localhost:27017/mini-project'
+
+      # Run your project's tests
+      # This assumes your tests can connect to the 'mongo' service at localhost:27017
+      # and do not require Nginx to be running for their execution.
+      - name: Run tests
+        run: npm test
