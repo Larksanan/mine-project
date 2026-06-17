@@ -11,9 +11,6 @@ import {
   FiUser,
   FiMessageSquare,
   FiBell,
-  FiPackage,
-  FiDroplet,
-  FiSettings,
   FiShield,
   FiLogOut,
 } from 'react-icons/fi';
@@ -35,9 +32,6 @@ export default function MobileUserSection({
     { name: 'Profile', href: '/profile', icon: FiUser },
     { name: 'Messages', href: '/messages', icon: FiMessageSquare },
     { name: 'Notifications', href: '/notifications', icon: FiBell },
-    { name: 'Pharmacy', href: '/pharmacy', icon: FiPackage },
-    { name: 'Lab Tests', href: '/laboratory', icon: FiDroplet },
-    { name: 'Settings', href: '/settings', icon: FiSettings },
   ];
 
   const handleSignOut = async () => {
