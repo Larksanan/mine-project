@@ -1,160 +1,263 @@
+/* eslint-disable no-undef */
 'use client';
-import { FaFacebook, FaInstagram, FaGithub } from 'react-icons/fa';
-import { motion } from 'framer-motion';
-import Logo from './Logo.static';
-import Link from 'next/link';
 
-const Footer = () => {
+import { FaFacebook, FaInstagram, FaGithub } from 'react-icons/fa';
+import { motion, Variants, AnimatePresence } from 'framer-motion';
+import Logo from '@/components/Logo.static';
+
+const footerVariants: Variants = {
+  hidden: { opacity: 0, y: 60 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.6, ease: 'easeOut' },
+  },
+};
+
+const containerVariants: Variants = {
+  hidden: {},
+  visible: {
+    transition: {
+      staggerChildren: 0.15,
+      delayChildren: 0.2,
+    },
+  },
+};
+
+const itemVariants: Variants = {
+  hidden: { opacity: 0, y: 24 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.5, ease: 'easeOut' },
+  },
+};
+
+const iconVariants: Variants = {
+  hidden: { opacity: 0, scale: 0.6 },
+  visible: (i: number) => ({
+    opacity: 1,
+    scale: 1,
+    transition: {
+      delay: i * 0.1 + 0.5,
+      duration: 0.35,
+      type: 'spring',
+      stiffness: 200,
+    },
+  }),
+};
+
+const bottomBarVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { delay: 0.8, duration: 0.5 } },
+};
+
+interface SocialLink {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+  hoverColor: string;
+}
+
+const socialLinks: SocialLink[] = [
+  {
+    href: 'https://www.facebook.com/jebarsan.thatcroos.7/',
+    label: 'Facebook',
+    icon: <FaFacebook />,
+    hoverColor: 'hover:text-blue-400',
+  },
+  {
+    href: 'https://www.instagram.com/lanka_tamizha/',
+    label: 'Instagram',
+    icon: <FaInstagram />,
+    hoverColor: 'hover:text-pink-400',
+  },
+  {
+    href: 'https://github.com',
+    label: 'GitHub',
+    icon: <FaGithub />,
+    hoverColor: 'hover:text-white',
+  },
+];
+
+interface AddressItem {
+  street: string;
+  city: string;
+  tel: string;
+  telRaw: string;
+}
+
+const addresses: AddressItem[] = [
+  {
+    street: 'Main street batticalo road,',
+    city: 'Pandirupu, Kalmunai.',
+    tel: 'Tel: 0762397951',
+    telRaw: '0762397951',
+  },
+  {
+    street: 'Main street batticalo road,',
+    city: 'Kinniya, Trincomalee.',
+    tel: 'Tel: +94 754104415',
+    telRaw: '+94754104415',
+  },
+];
+
+const Footer: React.FC = () => {
   const currentYear = new Date().getFullYear();
 
   return (
-    <motion.footer
-      initial={{ opacity: 0, y: 50 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: 'easeInOut' }}
-      className='bg-gray-800 text-white p-4'
-    >
-      <div className='bg-gray-800 py-4 text-gray-400'>
-        <div className='container px-4 mx-auto'>
-          <div className='-mx-4 flex flex-wrap justify-between'>
-            {/* Logo and Description */}
-            <div className='px-4 my-4 w-full xl:w-1/5 text-left'>
-              <Logo
-                size='lg'
-                showImage={false}
-                className='my-logo'
-                variant='health'
-              />
+    <AnimatePresence mode='wait'>
+      <motion.footer
+        variants={footerVariants}
+        initial='hidden'
+        whileInView='visible'
+        viewport={{ once: true, amount: 0.1 }}
+        className='bg-gray-800 text-white'
+      >
+        <div className='py-12 text-gray-400'>
+          <div className='container mx-auto px-6'>
+            <motion.div
+              variants={containerVariants}
+              initial='hidden'
+              whileInView='visible'
+              viewport={{ once: true }}
+              className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10'
+            >
+              {/* Logo + tagline */}
+              <motion.div
+                variants={itemVariants}
+                className='flex flex-col items-start'
+              >
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.5, delay: 0.1 }}
+                  className='text-white text-2xl font-bold tracking-wide mb-3'
+                >
+                  <Logo />
+                </motion.div>
+                <p className='text-sm text-gray-400 leading-relaxed max-w-xs'>
+                  24-Hour Walk-In Clinic and Emergency services for you and your
+                  family.
+                </p>
+              </motion.div>
 
-              <p className=' px-4  text-justify pb-4 mb-4 '>
-                24-Hour Walk-In Clinic and Emergency.
-              </p>
-            </div>
-
-            <div className='px-4 my-4 w-full sm:w-auto text-left'>
-              <div>
-                <h2 className='inline-block text-2xl pb-4 mb-4 border-b-4 border-blue-600'>
-                  Company
-                </h2>
-              </div>
-              <ul className='leading-8'>
-                <li>
-                  <Link
-                    href='/patient/appointments'
-                    className='hover:text-blue-400'
-                  >
-                    Appointments
-                  </Link>
-                </li>
-                <li>
-                  <Link href='/my-cart' className='hover:text-blue-400'>
-                    My Cart
-                  </Link>
-                </li>
-                <li>
-                  <Link href='/shop' className='hover:text-blue-400'>
-                    Shop
-                  </Link>
-                </li>
-
-                <li>
-                  <Link
-                    href='/patient/laboratory'
-                    className='hover:text-blue-400'
-                  >
-                    Laboratory
-                  </Link>
-                </li>
-                <li>
-                  <Link href='/contact-us' className='hover:text-blue-400'>
-                    Contact Us
-                  </Link>
-                </li>
-              </ul>
-            </div>
-
-            {/* Address */}
-            <div className='px-4 my-4 w-full sm:w-auto text-left'>
-              <div>
-                <h2 className='inline-block text-2xl pb-4 mb-4 border-b-4 border-blue-600'>
+              {/* Address */}
+              <motion.div
+                variants={itemVariants}
+                className='flex flex-col items-start'
+              >
+                <motion.h2
+                  initial={{ scaleX: 0, originX: 0 }}
+                  whileInView={{ scaleX: 1 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.4, delay: 0.3 }}
+                  className='text-xl font-semibold text-white pb-3 mb-4 border-b-4 border-blue-600 w-fit'
+                >
                   Address
-                </h2>
-                <p className='text-lm text-gray-400'>
-                  Main street batticalo road, <br />
-                  Pandirupu,Kalmunai. <br />
-                  Tel: 0762397951
-                </p>
-                <br />
-                <p className='text-lm text-gray-400'>
-                  Main street batticalo road, <br />
-                  kinniya,trincomalee. <br />
-                  Tel: +94 754104415
-                </p>
-              </div>
-            </div>
+                </motion.h2>
 
-            <div className='px-4 my-4 w-full sm:w-auto xl:w-1/5 text-left'>
-              <div>
-                <h2 className='inline-block text-2xl pb-4 mb-4 border-b-4 border-blue-600'>
+                <div className='space-y-4'>
+                  {addresses.map((addr, i) => (
+                    <motion.p
+                      key={i}
+                      initial={{ opacity: 0, x: -10 }}
+                      whileInView={{ opacity: 1, x: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: 0.35 + i * 0.12, duration: 0.4 }}
+                      className='text-sm text-gray-400 leading-relaxed'
+                    >
+                      {addr.street}
+                      <br />
+                      {addr.city}
+                      <br />
+                      <a
+                        href={`tel:${addr.telRaw}`}
+                        className='text-blue-400 hover:text-blue-300 transition-colors duration-200'
+                      >
+                        {addr.tel}
+                      </a>
+                    </motion.p>
+                  ))}
+                </div>
+              </motion.div>
+
+              {/* Social */}
+              <motion.div
+                variants={itemVariants}
+                className='flex flex-col items-start'
+              >
+                <motion.h2
+                  initial={{ scaleX: 0, originX: 0 }}
+                  whileInView={{ scaleX: 1 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.4, delay: 0.4 }}
+                  className='text-xl font-semibold text-white pb-3 mb-4 border-b-4 border-blue-600 w-fit'
+                >
                   Connect With Us
-                </h2>
-              </div>
-              <div className='flex space-x-4 mt-2'>
-                <motion.a
-                  href='https://www.facebook.com/jebarsan.thatcroos.7/'
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  aria-label='Facebook'
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <FaFacebook className='text-2xl hover:text-blue-400' />
-                </motion.a>
-                <motion.a
-                  href='https://www.instagram.com/lanka_tamizha/?utm_source=qr&igsh=dzd2cHp3endqemJl#'
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  aria-label='Instagram'
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <FaInstagram className='text-2xl hover:text-blue-400' />
-                </motion.a>
-                <motion.a
-                  href='https://github.com'
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  aria-label='GitHub'
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <FaGithub className='text-2xl hover:text-blue-400' />
-                </motion.a>
-              </div>
-            </div>
+                </motion.h2>
+
+                <div className='flex items-center gap-5 mt-1'>
+                  {socialLinks.map((social, i) => (
+                    <motion.a
+                      key={social.label}
+                      custom={i}
+                      variants={iconVariants}
+                      initial='hidden'
+                      whileInView='visible'
+                      viewport={{ once: true }}
+                      href={social.href}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      aria-label={social.label}
+                      whileHover={{ scale: 1.25, rotate: 8 }}
+                      whileTap={{ scale: 0.9 }}
+                      className={`text-2xl text-gray-400 ${social.hoverColor} transition-colors duration-200`}
+                    >
+                      {social.icon}
+                    </motion.a>
+                  ))}
+                </div>
+
+                {/* Animated divider accent */}
+                <motion.div
+                  initial={{ width: 0 }}
+                  whileInView={{ width: '100%' }}
+                  viewport={{ once: true }}
+                  transition={{ delay: 0.9, duration: 0.6, ease: 'easeOut' }}
+                  className='mt-6 h-px bg-linear-to-r from-blue-600 to-transparent max-w-xs'
+                />
+              </motion.div>
+            </motion.div>
           </div>
         </div>
-      </div>
 
-      <div className='bg-indigo-700 py-4 text-gray-100'>
-        <div className='container mx-auto px-4'>
-          <div className='-mx-4 flex flex-wrap justify-between'>
-            <div className='px-4 w-full text-left sm:w-auto'>
+        {/* ── Bottom bar ── */}
+        <motion.div
+          variants={bottomBarVariants}
+          initial='hidden'
+          whileInView='visible'
+          viewport={{ once: true }}
+          className='bg-indigo-700 py-4 text-gray-100'
+        >
+          <div className='container mx-auto px-6'>
+            <div className='flex flex-col sm:flex-row items-center justify-between gap-2 text-sm text-center sm:text-left'>
               <p>
-                &copy; {currentYear} Developed and Designed by |
-                <a
+                &copy; {currentYear} Developed and Designed by |{' '}
+                <motion.a
                   href='mailto:gwu-hict-2021-42@gwu.ac.lk'
-                  className='text-white hover:text-blue-400'
+                  whileHover={{ color: '#93c5fd' }}
+                  className='font-semibold text-white transition-colors duration-200'
                 >
-                  {' '}
                   COFFEE CODERS TEAM
-                </a>
+                </motion.a>
               </p>
             </div>
           </div>
-        </div>
-      </div>
-    </motion.footer>
+        </motion.div>
+      </motion.footer>
+    </AnimatePresence>
   );
 };
 

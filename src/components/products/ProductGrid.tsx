@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Product } from '@/types/product';
 import ProductCard from './ProductCard';
 import useCartContext, { type CartContextType } from '@/context/CartContext';
+import { useToast } from '@/hooks/useToast';
 
 interface ProductGridProps {
   products: Product[];
@@ -12,6 +13,7 @@ interface ProductGridProps {
 export default function ProductGrid({ products }: ProductGridProps) {
   const router = useRouter();
   const { addToCart } = useCartContext() as CartContextType;
+  const toast = useToast();
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const handleQuantityChange = (productId: string, value: number) => {
     setQuantities(prev => ({
@@ -33,6 +35,7 @@ export default function ProductGrid({ products }: ProductGridProps) {
       inStock: product.inStock,
       stockQuantity: product.stockQuantity,
     });
+    toast.showToast(`${product.name} has been added to your cart.`, 'success');
   };
 
   const handleBuyNow = (product: Product) => {
@@ -43,8 +46,8 @@ export default function ProductGrid({ products }: ProductGridProps) {
   return (
     <section
       id='Projects'
-      className='w-fit mx-auto grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4
-                 justify-items-center gap-y-20 gap-x-14 mt-10 mb-5'
+      className='w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 
+                 gap-6 md:gap-8 lg:gap-10 mt-10 mb-12'
     >
       {products.map((product, index) => {
         const productId = product._id || product.id;

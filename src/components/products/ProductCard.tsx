@@ -50,21 +50,19 @@ export default function ProductCard({
 
   return (
     <motion.div
-      className='w-72 bg-white shadow-md rounded-xl duration-500 hover:scale-105 hover:shadow-xl'
-      whileHover={{ scale: 1.05 }}
-      whileTap={{ scale: 0.95 }}
+      className='group w-full bg-white dark:bg-gray-800 shadow-sm hover:shadow-2xl rounded-2xl overflow-hidden transition-all duration-500 border border-gray-100 dark:border-gray-700'
+      whileHover={{ y: -10 }}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: index * 0.1 }}
     >
       <Link href={`/shop/pharmacy/${productId}`}>
-        <div className='cursor-pointer relative'>
+        <div className='cursor-pointer relative aspect-square bg-gray-50 dark:bg-gray-900/50'>
           <Image
             src={product.image || '/placeholder-product.jpg'}
             alt={product.name}
-            width={288}
-            height={320}
-            className='h-80 w-72 object-cover rounded-t-xl'
+            fill
+            className='object-contain p-6 transition-transform duration-700 group-hover:scale-110'
             priority={index < 4}
             onError={e => {
               e.currentTarget.src = '/placeholder-product.jpg';
@@ -83,7 +81,7 @@ export default function ProductCard({
         </div>
       </Link>
 
-      <div className='px-4 py-3 w-72'>
+      <div className='p-5'>
         <h2 className='text-xl font-semibold text-black mb-2 truncate'>
           {product.name}
         </h2>
@@ -96,14 +94,16 @@ export default function ProductCard({
         <p className='text-sm text-gray-600 mb-1'>
           <span className='font-semibold'>Brand:</span> {product.manufacturer}
         </p>
-        <p
-          className={`text-sm mb-1 ${product.inStock ? 'text-green-600' : 'text-red-600'}`}
-        >
-          <span className='font-semibold'>Stock:</span>{' '}
-          {product.inStock
-            ? `${product.stockQuantity} available`
-            : 'Out of Stock'}
-        </p>
+        <div className='flex items-center gap-2 mb-1'>
+          <span className='text-sm font-semibold text-gray-600'>Stock:</span>
+          <span
+            className={`text-sm font-medium ${product.inStock ? 'text-green-600' : 'text-red-600'}`}
+          >
+            {product.inStock
+              ? `${product.stockQuantity} available`
+              : 'Out of Stock'}
+          </span>
+        </div>
 
         <div className='flex items-center justify-between mt-3 mb-3'>
           <p className='text-lg font-bold text-black'>
