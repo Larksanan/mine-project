@@ -64,12 +64,6 @@ export default function NavItems({
       ],
       DOCTOR: [
         {
-          name: 'My Patients',
-          href: '/patients',
-          icon: FiUsers,
-        },
-
-        {
           name: 'Prescriptions',
           href: '/doctor/prescriptions',
           icon: FiClipboard,

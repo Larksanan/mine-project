@@ -79,6 +79,11 @@ export default function UserMenuItems({
         icon: FiDroplet,
       },
       {
+        name: 'My Patients',
+        href: '/patients',
+        icon: FiUsers,
+      },
+      {
         name: 'Reports',
         href: '/records',
         icon: FiFileText,
