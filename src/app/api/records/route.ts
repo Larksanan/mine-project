@@ -23,17 +23,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    if (
-      !session.user.role ||
-      (session.user.role !== 'RECEPTIONIST' &&
-        session.user.role !== 'ADMIN' &&
-        session.user.role !== 'DOCTOR' &&
-        session.user.role !== 'LABTECH')
-    ) {
+    const allowedRoles = ['RECEPTIONIST', 'ADMIN', 'DOCTOR', 'LABTECH'];
+    if (!session.user.role || !allowedRoles.includes(session.user.role)) {
       return NextResponse.json(
         {
           success: false,
-          error: 'Forbidden - Doctor access required',
+          error: 'Forbidden - Insufficient permissions',
         },
         { status: 403 }
       );
@@ -42,28 +37,63 @@ export async function GET(request: NextRequest) {
     await connectDB();
 
     const { searchParams } = new URL(request.url);
+    const isAdmin = session.user.role === 'ADMIN';
+
     const patientId = searchParams.get('patientId');
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '100');
-
     const skip = (page - 1) * limit;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const query: any = { doctorId: session.user.id };
+    const query: any = isAdmin
+      ? {} // ADMIN → fetch all records
+      : { doctorId: session.user.id }; // Others → own records only
+
+    // Shared filter available to all roles
     if (patientId) query.patientId = patientId;
 
-    const records = await MedicalRecord.find(query)
-      .populate(
-        'patientId',
-        'firstName lastName email phone dateOfBirth gender'
-      )
-      .populate('doctorId', 'name email specialization')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
+    // Admin-only advanced filters
+    if (isAdmin) {
+      const doctorId = searchParams.get('doctorId');
+      const recordType = searchParams.get('recordType');
+      const status = searchParams.get('status');
+      const startDate = searchParams.get('startDate');
+      const endDate = searchParams.get('endDate');
+      const search = searchParams.get('search');
 
-    const total = await MedicalRecord.countDocuments(query);
+      if (doctorId) query.doctorId = doctorId;
+      if (recordType) query.recordType = recordType;
+      if (status) query.status = status;
+
+      // Date range filter
+      if (startDate || endDate) {
+        query.date = {};
+        if (startDate) query.date.$gte = new Date(startDate);
+        if (endDate) query.date.$lte = new Date(endDate);
+      }
+
+      // Text search on title or description
+      if (search) {
+        query.$or = [
+          { title: { $regex: search, $options: 'i' } },
+          { description: { $regex: search, $options: 'i' } },
+        ];
+      }
+    }
+
+    const [records, total] = await Promise.all([
+      MedicalRecord.find(query)
+        .populate(
+          'patientId',
+          'firstName lastName email phone dateOfBirth gender'
+        )
+        .populate('doctorId', 'name email specialization')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      MedicalRecord.countDocuments(query),
+    ]);
 
     return NextResponse.json({
       success: true,
@@ -107,13 +137,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (
-      !session.user.role ||
-      (session.user.role !== 'RECEPTIONIST' &&
-        session.user.role !== 'ADMIN' &&
-        session.user.role !== 'DOCTOR' &&
-        session.user.role !== 'LABTECH')
-    ) {
+    const allowedRoles = ['RECEPTIONIST', 'ADMIN', 'DOCTOR', 'LABTECH'];
+    if (!session.user.role || !allowedRoles.includes(session.user.role)) {
       console.log('User role check failed:', session.user.role);
       return NextResponse.json(
         {
@@ -282,7 +307,6 @@ export async function POST(request: NextRequest) {
       });
 
       const medicalRecord = new MedicalRecord(recordData);
-
       await medicalRecord.save();
       console.log('Medical record saved with ID:', medicalRecord._id);
 
@@ -294,6 +318,7 @@ export async function POST(request: NextRequest) {
         )
         .populate('doctorId', 'name email specialization')
         .lean();
+
       return NextResponse.json(
         {
           success: true,

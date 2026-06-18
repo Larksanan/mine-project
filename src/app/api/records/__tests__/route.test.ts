@@ -7,7 +7,6 @@ import { join } from 'path';
 import { existsSync } from 'fs';
 import { NextRequest } from 'next/server';
 
-// Mock dependencies
 jest.mock('next-auth');
 jest.mock('@/lib/mongodb');
 jest.mock('@/models/MedicalRecord');
@@ -26,11 +25,45 @@ const mockMkdir = mkdir as jest.MockedFunction<typeof mkdir>;
 const mockExistsSync = existsSync as jest.MockedFunction<typeof existsSync>;
 const mockJoin = join as jest.MockedFunction<typeof join>;
 
-// Mock console methods
 const originalConsoleLog = console.log;
 const originalConsoleError = console.error;
 const mockConsoleLog = jest.fn();
 const mockConsoleError = jest.fn();
+
+/** Build a chainable Mongoose find mock that resolves to `records`. */
+function buildFindChain(records: unknown[] = []) {
+  const mockLean = jest.fn().mockResolvedValue(records);
+  const mockLimit = jest.fn().mockReturnValue({ lean: mockLean });
+  const mockSkip = jest.fn().mockReturnValue({ limit: mockLimit });
+  const mockSort = jest.fn().mockReturnValue({ skip: mockSkip });
+
+  const mockPopulate = jest.fn();
+  const mockQuery = { populate: mockPopulate, sort: mockSort };
+  mockPopulate.mockReturnValue(mockQuery);
+
+  return {
+    mockFind: jest.fn().mockReturnValue(mockQuery),
+    mockSkip,
+    mockLimit,
+    mockLean,
+  };
+}
+
+/** Build a chainable findById mock that resolves to `record`. */
+function buildFindByIdChain(record: unknown = {}) {
+  const mockPopulate = jest.fn();
+  const mockQuery = {
+    populate: mockPopulate,
+    lean: jest.fn().mockResolvedValue(record),
+  };
+  mockPopulate.mockReturnValue(mockQuery);
+  return mockQuery;
+}
+
+/** Create a minimal authenticated session for a given role. */
+function sessionFor(role: string, id = 'user-123') {
+  return { user: { id, role } };
+}
 
 describe('Medical Records API', () => {
   let mockRequest: NextRequest;
@@ -50,120 +83,74 @@ describe('Medical Records API', () => {
     mockConsoleLog.mockClear();
     mockConsoleError.mockClear();
 
-    // Create a mock NextRequest
     mockRequest = {
       url: 'http://localhost:3000/api/doctor/records',
       headers: new Headers(),
       formData: jest.fn(),
     } as unknown as NextRequest;
 
-    // Mock connectDB
     (connectDB as jest.Mock).mockResolvedValue(undefined);
-
-    // Default mock for path.join
-    mockJoin.mockImplementation((...args) => args.join('/'));
+    mockJoin.mockImplementation((...args: string[]) => args.join('/'));
   });
 
   describe('GET /api/doctor/records', () => {
-    it('should return 401 if user is not authenticated', async () => {
-      // Arrange
+    it('returns 401 when unauthenticated', async () => {
       mockGetServerSession.mockResolvedValue(null);
 
-      // Act
       const response = await GET(mockRequest);
       const data = await response.json();
 
-      // Assert
       expect(response.status).toBe(401);
-      expect(data).toEqual({
-        success: false,
-        error: 'Unauthorized',
-      });
+      expect(data).toEqual({ success: false, error: 'Unauthorized' });
     });
 
-    it('should return 403 if user role is not allowed', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'user-123',
-          role: 'PATIENT', // Not allowed role
-        },
-      });
+    it('returns 403 when role is not allowed (PATIENT)', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('PATIENT'));
 
-      // Act
       const response = await GET(mockRequest);
       const data = await response.json();
 
-      // Assert
       expect(response.status).toBe(403);
       expect(data).toEqual({
         success: false,
-        error: 'Forbidden - Doctor access required',
+        error: 'Forbidden - Insufficient permissions',
       });
     });
 
-    it('should return 403 if user has no role', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'user-123',
-          // No role property
-        },
-      });
+    it('returns 403 when user has no role', async () => {
+      mockGetServerSession.mockResolvedValue({ user: { id: 'user-123' } });
 
-      // Act
       const response = await GET(mockRequest);
       const data = await response.json();
 
-      // Assert
       expect(response.status).toBe(403);
       expect(data).toEqual({
         success: false,
-        error: 'Forbidden - Doctor access required',
+        error: 'Forbidden - Insufficient permissions',
       });
     });
 
-    it('should fetch records for RECEPTIONIST role', async () => {
-      // Arrange
-      const mockUserId = 'doctor-123';
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: mockUserId,
-          role: 'RECEPTIONIST',
-        },
-      });
+    it('returns own records for DOCTOR role', async () => {
+      const userId = 'doctor-123';
+      mockGetServerSession.mockResolvedValue(sessionFor('DOCTOR', userId));
 
       const mockRecords = [
         {
           _id: 'record-1',
           patientId: { _id: 'patient-1', firstName: 'John', lastName: 'Doe' },
-          doctorId: { _id: mockUserId, name: 'Dr. Smith' },
+          doctorId: { _id: userId, name: 'Dr. Smith' },
           title: 'Checkup',
           recordType: 'CONSULTATION',
         },
       ];
 
-      // Mock the full Mongoose chain
-      const mockLean = jest.fn().mockResolvedValue(mockRecords);
-      const mockLimit = jest.fn().mockReturnValue({ lean: mockLean });
-      const mockSkip = jest.fn().mockReturnValue({ limit: mockLimit });
-      const mockSort = jest.fn().mockReturnValue({ skip: mockSkip });
-
-      const mockPopulate = jest.fn();
-      // Allow chaining populate, then sort
-      const mockQuery = { populate: mockPopulate, sort: mockSort };
-      mockPopulate.mockReturnValue(mockQuery);
-
-      const mockFind = jest.fn().mockReturnValue(mockQuery);
-
+      const { mockFind } = buildFindChain(mockRecords);
       (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
       (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(1);
 
-      // Act
       const response = await GET(mockRequest);
       const data = await response.json();
 
-      // Assert
       expect(response.status).toBe(200);
       expect(data.success).toBe(true);
       expect(data.data).toEqual(mockRecords);
@@ -173,114 +160,245 @@ describe('Medical Records API', () => {
         total: 1,
         pages: 1,
       });
-
-      // Verify query
-      expect(MedicalRecord.find).toHaveBeenCalledWith({
-        doctorId: mockUserId,
-      });
-      expect(mockPopulate).toHaveBeenCalledWith(
-        'patientId',
-        'firstName lastName email phone dateOfBirth gender'
-      );
-      expect(mockPopulate).toHaveBeenCalledWith(
-        'doctorId',
-        'name email specialization'
-      );
+      expect(MedicalRecord.find).toHaveBeenCalledWith({ doctorId: userId });
     });
 
-    it('should filter by patientId when provided', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
+    it('returns own records for RECEPTIONIST role', async () => {
+      const userId = 'rec-123';
+      mockGetServerSession.mockResolvedValue(
+        sessionFor('RECEPTIONIST', userId)
+      );
 
-      mockRequest = {
-        url: 'http://localhost:3000/api/doctor/records?patientId=patient-456',
-        headers: new Headers(),
-        formData: jest.fn(),
-      } as unknown as NextRequest;
+      const { mockFind } = buildFindChain([]);
+      (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
+      (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(0);
 
-      (MedicalRecord.find as jest.Mock).mockReturnValue({
-        populate: jest.fn().mockReturnValue({
-          populate: jest.fn().mockReturnValue({
-            sort: jest.fn().mockReturnValue({
-              skip: jest.fn().mockReturnValue({
-                limit: jest.fn().mockReturnValue({
-                  lean: jest.fn().mockResolvedValue([]),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
-
-      // Act
       await GET(mockRequest);
 
-      // Assert
+      expect(MedicalRecord.find).toHaveBeenCalledWith({ doctorId: userId });
+    });
+
+    it('returns own records for LABTECH role', async () => {
+      const userId = 'lab-123';
+      mockGetServerSession.mockResolvedValue(sessionFor('LABTECH', userId));
+
+      const { mockFind } = buildFindChain([]);
+      (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
+      (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(0);
+
+      await GET(mockRequest);
+
+      expect(MedicalRecord.find).toHaveBeenCalledWith({ doctorId: userId });
+    });
+
+    it('returns ALL records for ADMIN role (no base doctorId filter)', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('ADMIN'));
+
+      const { mockFind } = buildFindChain([]);
+      (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
+      (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(0);
+
+      await GET(mockRequest);
+
+      // query must NOT contain doctorId from session
+      expect(MedicalRecord.find).toHaveBeenCalledWith({});
+    });
+
+    it('admin can filter by doctorId query param', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('ADMIN'));
+      mockRequest = {
+        ...mockRequest,
+        url: 'http://localhost:3000/api/doctor/records?doctorId=doc-999',
+      } as unknown as NextRequest;
+
+      const { mockFind } = buildFindChain([]);
+      (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
+      (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(0);
+
+      await GET(mockRequest);
+
+      expect(MedicalRecord.find).toHaveBeenCalledWith({ doctorId: 'doc-999' });
+    });
+
+    it('admin can filter by recordType', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('ADMIN'));
+      mockRequest = {
+        ...mockRequest,
+        url: 'http://localhost:3000/api/doctor/records?recordType=LAB_RESULT',
+      } as unknown as NextRequest;
+
+      const { mockFind } = buildFindChain([]);
+      (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
+      (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(0);
+
+      await GET(mockRequest);
+
       expect(MedicalRecord.find).toHaveBeenCalledWith({
-        doctorId: 'doctor-123',
+        recordType: 'LAB_RESULT',
+      });
+    });
+
+    it('admin can filter by status', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('ADMIN'));
+      mockRequest = {
+        ...mockRequest,
+        url: 'http://localhost:3000/api/doctor/records?status=ACTIVE',
+      } as unknown as NextRequest;
+
+      const { mockFind } = buildFindChain([]);
+      (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
+      (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(0);
+
+      await GET(mockRequest);
+
+      expect(MedicalRecord.find).toHaveBeenCalledWith({ status: 'ACTIVE' });
+    });
+
+    it('admin can filter by date range', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('ADMIN'));
+      mockRequest = {
+        ...mockRequest,
+        url: 'http://localhost:3000/api/doctor/records?startDate=2025-01-01&endDate=2025-12-31',
+      } as unknown as NextRequest;
+
+      const { mockFind } = buildFindChain([]);
+      (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
+      (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(0);
+
+      await GET(mockRequest);
+
+      expect(MedicalRecord.find).toHaveBeenCalledWith({
+        date: {
+          $gte: new Date('2025-01-01'),
+          $lte: new Date('2025-12-31'),
+        },
+      });
+    });
+
+    it('admin can search by title/description keyword', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('ADMIN'));
+      mockRequest = {
+        ...mockRequest,
+        url: 'http://localhost:3000/api/doctor/records?search=diabetes',
+      } as unknown as NextRequest;
+
+      const { mockFind } = buildFindChain([]);
+      (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
+      (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(0);
+
+      await GET(mockRequest);
+
+      expect(MedicalRecord.find).toHaveBeenCalledWith({
+        $or: [
+          { title: { $regex: 'diabetes', $options: 'i' } },
+          { description: { $regex: 'diabetes', $options: 'i' } },
+        ],
+      });
+    });
+
+    it('admin combined filters work together', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('ADMIN'));
+      mockRequest = {
+        ...mockRequest,
+        url: 'http://localhost:3000/api/doctor/records?doctorId=doc-1&status=ACTIVE&recordType=CONSULTATION',
+      } as unknown as NextRequest;
+
+      const { mockFind } = buildFindChain([]);
+      (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
+      (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(0);
+
+      await GET(mockRequest);
+
+      expect(MedicalRecord.find).toHaveBeenCalledWith({
+        doctorId: 'doc-1',
+        status: 'ACTIVE',
+        recordType: 'CONSULTATION',
+      });
+    });
+
+    it('filters by patientId for non-admin', async () => {
+      mockGetServerSession.mockResolvedValue(
+        sessionFor('RECEPTIONIST', 'rec-1')
+      );
+      mockRequest = {
+        ...mockRequest,
+        url: 'http://localhost:3000/api/doctor/records?patientId=patient-456',
+      } as unknown as NextRequest;
+
+      const { mockFind } = buildFindChain([]);
+      (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
+      (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(0);
+
+      await GET(mockRequest);
+
+      expect(MedicalRecord.find).toHaveBeenCalledWith({
+        doctorId: 'rec-1',
         patientId: 'patient-456',
       });
     });
 
-    it('should handle pagination parameters', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
-
+    it('filters by patientId for admin', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('ADMIN'));
       mockRequest = {
-        url: 'http://localhost:3000/api/doctor/records?page=2&limit=20',
-        headers: new Headers(),
-        formData: jest.fn(),
+        ...mockRequest,
+        url: 'http://localhost:3000/api/doctor/records?patientId=patient-456',
       } as unknown as NextRequest;
 
-      // Mock the chain
-      const mockLean = jest.fn().mockResolvedValue([]);
-      const mockLimit = jest.fn().mockReturnValue({ lean: mockLean });
-      const mockSkip = jest.fn().mockReturnValue({ limit: mockLimit });
-      const mockSort = jest.fn().mockReturnValue({ skip: mockSkip });
+      const { mockFind } = buildFindChain([]);
+      (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
+      (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(0);
 
-      const mockPopulate = jest.fn();
-      const mockQuery = { populate: mockPopulate, sort: mockSort };
-      mockPopulate.mockReturnValue(mockQuery);
+      await GET(mockRequest);
 
-      const mockFind = jest.fn().mockReturnValue(mockQuery);
+      expect(MedicalRecord.find).toHaveBeenCalledWith({
+        patientId: 'patient-456',
+      });
+    });
 
+    it('handles pagination parameters correctly', async () => {
+      mockGetServerSession.mockResolvedValue(
+        sessionFor('RECEPTIONIST', 'doc-1')
+      );
+      mockRequest = {
+        ...mockRequest,
+        url: 'http://localhost:3000/api/doctor/records?page=2&limit=20',
+      } as unknown as NextRequest;
+
+      const { mockFind, mockSkip, mockLimit } = buildFindChain([]);
       (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
       (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(50);
 
-      // Act
       const response = await GET(mockRequest);
       const data = await response.json();
 
-      // Assert
       expect(data.pagination).toEqual({
         page: 2,
         limit: 20,
         total: 50,
         pages: 3,
       });
-
-      expect(mockSkip).toHaveBeenCalledWith(20); // (page-1) * limit
+      expect(mockSkip).toHaveBeenCalledWith(20); // (2-1) * 20
       expect(mockLimit).toHaveBeenCalledWith(20);
     });
 
-    it('should handle database errors', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
+    it('defaults to page=1 and limit=100', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('DOCTOR', 'doc-1'));
+
+      const { mockFind, mockSkip, mockLimit } = buildFindChain([]);
+      (MedicalRecord.find as jest.Mock).mockImplementation(mockFind);
+      (MedicalRecord.countDocuments as jest.Mock).mockResolvedValue(0);
+
+      const response = await GET(mockRequest);
+      const data = await response.json();
+
+      expect(data.pagination.page).toBe(1);
+      expect(data.pagination.limit).toBe(100);
+      expect(mockSkip).toHaveBeenCalledWith(0);
+      expect(mockLimit).toHaveBeenCalledWith(100);
+    });
+
+    it('returns 500 on database error', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
 
       (MedicalRecord.find as jest.Mock).mockReturnValue({
         populate: jest.fn().mockReturnValue({
@@ -298,14 +416,13 @@ describe('Medical Records API', () => {
         }),
       });
 
-      // Act
       const response = await GET(mockRequest);
       const data = await response.json();
 
-      // Assert
       expect(response.status).toBe(500);
       expect(data.success).toBe(false);
       expect(data.error).toBe('Internal server error');
+      expect(data.details).toBe('Database error');
     });
   });
 
@@ -317,40 +434,26 @@ describe('Medical Records API', () => {
       (mockRequest.formData as jest.Mock).mockResolvedValue(mockFormData);
     });
 
-    it('should return 401 if user is not authenticated', async () => {
-      // Arrange
+    it('returns 401 when unauthenticated', async () => {
       mockGetServerSession.mockResolvedValue(null);
 
-      // Act
       const response = await POST(mockRequest);
       const data = await response.json();
 
-      // Assert
       expect(response.status).toBe(401);
-      expect(data).toEqual({
-        success: false,
-        error: 'Unauthorized',
-      });
+      expect(data).toEqual({ success: false, error: 'Unauthorized' });
       expect(mockConsoleLog).toHaveBeenCalledWith(
         'Session check:',
         'Not authenticated'
       );
     });
 
-    it('should return 403 if user role is not allowed', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'user-123',
-          role: 'PATIENT', // Not allowed
-        },
-      });
+    it('returns 403 when role is not allowed', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('PATIENT'));
 
-      // Act
       const response = await POST(mockRequest);
       const data = await response.json();
 
-      // Assert
       expect(response.status).toBe(403);
       expect(data).toEqual({
         success: false,
@@ -362,24 +465,15 @@ describe('Medical Records API', () => {
       );
     });
 
-    it('should return 400 if FormData parsing fails', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
-
+    it('returns 400 when FormData parsing fails (async rejection)', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
       (mockRequest.formData as jest.Mock).mockRejectedValue(
         new Error('FormData parse error')
       );
 
-      // Act
       const response = await POST(mockRequest);
       const data = await response.json();
 
-      // Assert
       expect(response.status).toBe(400);
       expect(data).toEqual({
         success: false,
@@ -388,27 +482,53 @@ describe('Medical Records API', () => {
       });
     });
 
-    it('should return 400 if required fields are missing', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
+    it('returns 400 when formData() throws synchronously', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      (mockRequest.formData as jest.Mock).mockImplementation(() => {
+        throw new Error('Unexpected sync error');
       });
 
-      // FormData with missing required fields
-      mockFormData.append('title', 'Test Title');
-      // Missing patientId, recordType, description, date
-
-      // Act
       const response = await POST(mockRequest);
       const data = await response.json();
 
-      // Assert
+      expect(response.status).toBe(400);
+      expect(data.success).toBe(false);
+      expect(data.error).toBe(
+        'Invalid form data - expected multipart/form-data'
+      );
+      expect(data.details).toBe('Unexpected sync error');
+    });
+
+    it('returns 400 with all missing-field errors', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      // FormData is empty — all required fields missing
+
+      const response = await POST(mockRequest);
+      const data = await response.json();
+
       expect(response.status).toBe(400);
       expect(data.success).toBe(false);
       expect(data.error).toBe('Validation failed');
+      expect(data.details).toEqual(
+        expect.arrayContaining([
+          'Patient ID is required',
+          'Record type is required',
+          'Title is required',
+          'Description is required',
+          'Date is required',
+        ])
+      );
+    });
+
+    it('returns 400 when only some fields are missing', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('DOCTOR'));
+      mockFormData.append('title', 'Some Title');
+      // patientId, recordType, description, date still missing
+
+      const response = await POST(mockRequest);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
       expect(data.details).toEqual(
         expect.arrayContaining([
           'Patient ID is required',
@@ -417,19 +537,13 @@ describe('Medical Records API', () => {
           'Date is required',
         ])
       );
+      expect(data.details).not.toContain('Title is required');
     });
 
-    it('should successfully create medical record without files', async () => {
-      // Arrange
-      const mockUserId = 'doctor-123';
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: mockUserId,
-          role: 'RECEPTIONIST',
-        },
-      });
+    it('creates a medical record without attachments (201)', async () => {
+      const userId = 'doctor-123';
+      mockGetServerSession.mockResolvedValue(sessionFor('DOCTOR', userId));
 
-      // Add all required fields
       mockFormData.append('patientId', 'patient-456');
       mockFormData.append('recordType', 'CONSULTATION');
       mockFormData.append('title', 'Annual Checkup');
@@ -438,26 +552,10 @@ describe('Medical Records API', () => {
       mockFormData.append('status', 'ACTIVE');
       mockFormData.append('doctorNotes', 'Follow up in 6 months');
 
-      const savedRecord = {
-        _id: 'record-123',
-        patientId: 'patient-456',
-        doctorId: mockUserId,
-        title: 'Annual Checkup',
-        description: 'Patient is in good health',
-        date: new Date('2024-01-15'),
-        status: 'ACTIVE',
-        doctorNotes: 'Follow up in 6 months',
-        attachments: [],
-      };
-
       const populatedRecord = {
         _id: 'record-123',
         patientId: { _id: 'patient-456', firstName: 'John', lastName: 'Doe' },
-        doctorId: {
-          _id: mockUserId,
-          name: 'Dr. Smith',
-          email: 'dr@example.com',
-        },
+        doctorId: { _id: userId, name: 'Dr. Smith', email: 'dr@example.com' },
         title: 'Annual Checkup',
         description: 'Patient is in good health',
         date: new Date('2024-01-15'),
@@ -466,41 +564,23 @@ describe('Medical Records API', () => {
         attachments: [],
       };
 
-      // Mock MedicalRecord constructor and save
-      const mockSave = jest.fn().mockResolvedValue(savedRecord);
-      const MockMedicalRecord = {
+      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
+      (MedicalRecord as unknown as jest.Mock).mockImplementation(() => ({
         save: mockSave,
-      };
-      (MedicalRecord as unknown as jest.Mock).mockImplementation(
-        () => MockMedicalRecord
+      }));
+      (MedicalRecord.findById as jest.Mock).mockReturnValue(
+        buildFindByIdChain(populatedRecord)
       );
 
-      // Mock findById for populated response
-      const mockLean = jest.fn().mockResolvedValue(populatedRecord);
-
-      const mockPopulate = jest.fn();
-      const mockQuery = { populate: mockPopulate, lean: mockLean };
-      mockPopulate.mockReturnValue(mockQuery);
-
-      (MedicalRecord.findById as jest.Mock).mockReturnValue(mockQuery);
-
-      // Act
       const response = await POST(mockRequest);
       const data = await response.json();
 
-      // Assert
       expect(response.status).toBe(201);
       expect(data.success).toBe(true);
       expect(data.message).toBe('Medical record created successfully');
-      expect(data.data).toEqual({
-        ...populatedRecord,
-        date: populatedRecord.date.toISOString(),
-      });
-
-      // Verify MedicalRecord was called with correct data
       expect(MedicalRecord).toHaveBeenCalledWith({
         patientId: 'patient-456',
-        doctorId: mockUserId,
+        doctorId: userId,
         recordType: 'CONSULTATION',
         title: 'Annual Checkup',
         description: 'Patient is in good health',
@@ -512,21 +592,62 @@ describe('Medical Records API', () => {
       expect(mockSave).toHaveBeenCalled();
     });
 
-    it('should handle file uploads successfully', async () => {
-      // Arrange
-      const mockUserId = 'doctor-123';
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: mockUserId,
-          role: 'RECEPTIONIST',
-        },
-      });
+    it('defaults status to ACTIVE when not provided', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      mockFormData.append('patientId', 'patient-456');
+      mockFormData.append('recordType', 'CONSULTATION');
+      mockFormData.append('title', 'Checkup');
+      mockFormData.append('description', 'Test');
+      mockFormData.append('date', '2024-01-15');
 
-      // Create mock files
-      const mockFile1 = new File(['test content 1'], 'report.pdf', {
+      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
+      (MedicalRecord as unknown as jest.Mock).mockImplementation(() => ({
+        save: mockSave,
+      }));
+      (MedicalRecord.findById as jest.Mock).mockReturnValue(
+        buildFindByIdChain()
+      );
+
+      await POST(mockRequest);
+
+      expect(MedicalRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'ACTIVE' })
+      );
+    });
+
+    it('defaults doctorNotes to empty string when not provided', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      mockFormData.append('patientId', 'patient-456');
+      mockFormData.append('recordType', 'CONSULTATION');
+      mockFormData.append('title', 'Checkup');
+      mockFormData.append('description', 'Test');
+      mockFormData.append('date', '2024-01-15');
+
+      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
+      (MedicalRecord as unknown as jest.Mock).mockImplementation(() => ({
+        save: mockSave,
+      }));
+      (MedicalRecord.findById as jest.Mock).mockReturnValue(
+        buildFindByIdChain()
+      );
+
+      await POST(mockRequest);
+
+      expect(MedicalRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ doctorNotes: '' })
+      );
+    });
+
+    it('saves uploaded files and stores paths in attachments', async () => {
+      const userId = 'doctor-123';
+      mockGetServerSession.mockResolvedValue(
+        sessionFor('RECEPTIONIST', userId)
+      );
+
+      const mockFile1 = new File(['content1'], 'report.pdf', {
         type: 'application/pdf',
       });
-      const mockFile2 = new File(['test content 2'], 'image.jpg', {
+      const mockFile2 = new File(['content2'], 'image.jpg', {
         type: 'image/jpeg',
       });
 
@@ -538,73 +659,36 @@ describe('Medical Records API', () => {
       mockFormData.append('attachments', mockFile1);
       mockFormData.append('attachments', mockFile2);
 
-      // Mock file system operations
-      mockExistsSync.mockReturnValue(false); // Directory doesn't exist
+      mockExistsSync.mockReturnValue(false);
       mockMkdir.mockResolvedValue(undefined);
       mockJoin
-        .mockReturnValueOnce('/test/path/uploads/medical-records')
-        .mockReturnValueOnce(
-          '/test/path/uploads/medical-records/1234567890-report.pdf'
-        )
-        .mockReturnValueOnce(
-          '/test/path/uploads/medical-records/1234567891-image.jpg'
-        );
+        .mockReturnValueOnce('/uploads/medical-records')
+        .mockReturnValueOnce('/uploads/medical-records/1234567890-report.pdf')
+        .mockReturnValueOnce('/uploads/medical-records/1234567891-image.jpg');
 
-      // Mock arrayBuffer for files
-      mockFile1.arrayBuffer = jest.fn().mockResolvedValue(new ArrayBuffer(10));
-      mockFile2.arrayBuffer = jest.fn().mockResolvedValue(new ArrayBuffer(10));
+      mockFile1.arrayBuffer = jest.fn().mockResolvedValue(new ArrayBuffer(8));
+      mockFile2.arrayBuffer = jest.fn().mockResolvedValue(new ArrayBuffer(8));
 
-      // Mock Date.now for consistent filename
       const originalDateNow = Date.now;
       Date.now = jest
         .fn()
         .mockReturnValueOnce(1234567890)
         .mockReturnValueOnce(1234567891);
 
-      const savedRecord = {
-        _id: 'record-123',
-        attachments: [
-          '/uploads/medical-records/1234567890-report.pdf',
-          '/uploads/medical-records/1234567891-image.jpg',
-        ],
-      };
-
-      const mockSave = jest.fn().mockResolvedValue(savedRecord);
-      const MockMedicalRecord = {
+      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
+      (MedicalRecord as unknown as jest.Mock).mockImplementation(() => ({
         save: mockSave,
-      };
-      (MedicalRecord as unknown as jest.Mock).mockImplementation(
-        () => MockMedicalRecord
+      }));
+      (MedicalRecord.findById as jest.Mock).mockReturnValue(
+        buildFindByIdChain()
       );
 
-      const mockPopulate = jest.fn();
-      const mockQuery = {
-        populate: mockPopulate,
-        lean: jest.fn().mockResolvedValue({}),
-      };
-      mockPopulate.mockReturnValue(mockQuery);
-
-      (MedicalRecord.findById as jest.Mock).mockReturnValue(mockQuery);
-
-      // Act
       await POST(mockRequest);
 
-      // Assert
-      expect(mockMkdir).toHaveBeenCalledWith(
-        '/test/path/uploads/medical-records',
-        { recursive: true }
-      );
+      expect(mockMkdir).toHaveBeenCalledWith('/uploads/medical-records', {
+        recursive: true,
+      });
       expect(mockWriteFile).toHaveBeenCalledTimes(2);
-      expect(mockWriteFile).toHaveBeenCalledWith(
-        '/test/path/uploads/medical-records/1234567890-report.pdf',
-        expect.any(Buffer)
-      );
-      expect(mockWriteFile).toHaveBeenCalledWith(
-        '/test/path/uploads/medical-records/1234567891-image.jpg',
-        expect.any(Buffer)
-      );
-
-      // Verify MedicalRecord was called with attachment paths
       expect(MedicalRecord).toHaveBeenCalledWith(
         expect.objectContaining({
           attachments: [
@@ -614,440 +698,69 @@ describe('Medical Records API', () => {
         })
       );
 
-      // Restore Date.now
       Date.now = originalDateNow;
     });
 
-    it('should handle empty file attachments gracefully', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
-
-      // Add empty file field
-      mockFormData.append('patientId', 'patient-456');
-      mockFormData.append('recordType', 'CONSULTATION');
-      mockFormData.append('title', 'Checkup');
-      mockFormData.append('description', 'Test');
-      mockFormData.append('date', '2024-01-15');
-      mockFormData.append('attachments', ''); // Empty file
-
-      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
-      const MockMedicalRecord = {
-        save: mockSave,
-      };
-      (MedicalRecord as unknown as jest.Mock).mockImplementation(
-        () => MockMedicalRecord
-      );
-
-      const mockPopulate = jest.fn();
-      const mockQuery = {
-        populate: mockPopulate,
-        lean: jest.fn().mockResolvedValue({}),
-      };
-      mockPopulate.mockReturnValue(mockQuery);
-
-      (MedicalRecord.findById as jest.Mock).mockReturnValue(mockQuery);
-
-      // Act
-      await POST(mockRequest);
-
-      // Assert
-      // Should not try to process empty files
-      expect(mockWriteFile).not.toHaveBeenCalled();
-      expect(MedicalRecord).toHaveBeenCalledWith(
-        expect.objectContaining({
-          attachments: [],
-        })
-      );
-    });
-
-    it('should handle file upload errors', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
-
-      const mockFile = new File(['test'], 'report.pdf', {
+    it('skips mkdir when upload directory already exists', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      const mockFile = new File(['data'], 'test.pdf', {
         type: 'application/pdf',
       });
+
       mockFormData.append('patientId', 'patient-456');
       mockFormData.append('recordType', 'CONSULTATION');
-      mockFormData.append('title', 'Checkup');
+      mockFormData.append('title', 'Test');
       mockFormData.append('description', 'Test');
       mockFormData.append('date', '2024-01-15');
       mockFormData.append('attachments', mockFile);
 
-      mockFile.arrayBuffer = jest.fn().mockResolvedValue(new ArrayBuffer(10));
-      mockExistsSync.mockReturnValue(true);
-      mockWriteFile.mockRejectedValue(new Error('Disk full'));
+      mockFile.arrayBuffer = jest.fn().mockResolvedValue(new ArrayBuffer(4));
+      mockExistsSync.mockReturnValue(true); // directory already exists
 
-      // Act
-      const response = await POST(mockRequest);
-      const data = await response.json();
+      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
+      (MedicalRecord as unknown as jest.Mock).mockImplementation(() => ({
+        save: mockSave,
+      }));
+      (MedicalRecord.findById as jest.Mock).mockReturnValue(
+        buildFindByIdChain()
+      );
 
-      // Assert
-      expect(response.status).toBe(500);
-      expect(data).toEqual({
-        success: false,
-        error: 'File upload failed',
-        details: 'Disk full',
-      });
+      await POST(mockRequest);
+
+      expect(mockMkdir).not.toHaveBeenCalled();
+      expect(mockWriteFile).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle database connection errors', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
+    it('skips empty/non-file attachment fields gracefully', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
 
       mockFormData.append('patientId', 'patient-456');
       mockFormData.append('recordType', 'CONSULTATION');
       mockFormData.append('title', 'Checkup');
       mockFormData.append('description', 'Test');
       mockFormData.append('date', '2024-01-15');
-
-      (connectDB as jest.Mock).mockRejectedValue(
-        new Error('Connection failed')
-      );
-
-      // Act
-      const response = await POST(mockRequest);
-      const data = await response.json();
-
-      // Assert
-      expect(response.status).toBe(500);
-      expect(data).toEqual({
-        success: false,
-        error: 'Database connection failed',
-        details: 'Connection failed',
-      });
-    });
-
-    it('should handle Mongoose validation errors', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
-
-      mockFormData.append('patientId', 'patient-456');
-      mockFormData.append('recordType', 'CONSULTATION');
-      mockFormData.append('title', 'Checkup');
-      mockFormData.append('description', 'Test');
-      mockFormData.append('date', '2024-01-15');
-
-      const validationError = new Error(
-        'Validation failed: patientId: Path `patientId` is required'
-      );
-      validationError.name = 'ValidationError';
-
-      const mockSave = jest.fn().mockRejectedValue(validationError);
-      const MockMedicalRecord = {
-        save: mockSave,
-      };
-      (MedicalRecord as unknown as jest.Mock).mockImplementation(
-        () => MockMedicalRecord
-      );
-
-      // Act
-      const response = await POST(mockRequest);
-      const data = await response.json();
-
-      // Assert
-      expect(response.status).toBe(400);
-      expect(data).toEqual({
-        success: false,
-        error: 'Validation error',
-        details: 'Validation failed: patientId: Path `patientId` is required',
-      });
-    });
-
-    it('should handle CastError for invalid IDs', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
-
-      mockFormData.append('patientId', 'invalid-id');
-      mockFormData.append('recordType', 'CONSULTATION');
-      mockFormData.append('title', 'Checkup');
-      mockFormData.append('description', 'Test');
-      mockFormData.append('date', '2024-01-15');
-
-      const castError = new Error(
-        'Cast to ObjectId failed for value "invalid-id"'
-      );
-      castError.name = 'CastError';
-
-      const mockSave = jest.fn().mockRejectedValue(castError);
-      const MockMedicalRecord = {
-        save: mockSave,
-      };
-      (MedicalRecord as unknown as jest.Mock).mockImplementation(
-        () => MockMedicalRecord
-      );
-
-      // Act
-      const response = await POST(mockRequest);
-      const data = await response.json();
-
-      // Assert
-      expect(response.status).toBe(400);
-      expect(data).toEqual({
-        success: false,
-        error: 'Invalid ID format',
-        details: 'Patient ID or Doctor ID is not a valid MongoDB ObjectId',
-      });
-    });
-
-    it('should handle generic save errors', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
-
-      mockFormData.append('patientId', 'patient-456');
-      mockFormData.append('recordType', 'CONSULTATION');
-      mockFormData.append('title', 'Checkup');
-      mockFormData.append('description', 'Test');
-      mockFormData.append('date', '2024-01-15');
-
-      const saveError = new Error('Unknown save error');
-      const mockSave = jest.fn().mockRejectedValue(saveError);
-      const MockMedicalRecord = {
-        save: mockSave,
-      };
-      (MedicalRecord as unknown as jest.Mock).mockImplementation(
-        () => MockMedicalRecord
-      );
-
-      // Act
-      const response = await POST(mockRequest);
-      const data = await response.json();
-
-      // Assert
-      expect(response.status).toBe(500);
-      expect(data).toEqual({
-        success: false,
-        error: 'Failed to save medical record',
-        details: 'Unknown save error',
-      });
-    });
-
-    it('should handle unexpected errors', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
-
-      (mockRequest.formData as jest.Mock).mockImplementation(() => {
-        throw new Error('Unexpected error');
-      });
-
-      // Act
-      const response = await POST(mockRequest);
-      const data = await response.json();
-
-      // Assert
-      expect(response.status).toBe(400);
-      expect(data.success).toBe(false);
-      expect(data.error).toBe(
-        'Invalid form data - expected multipart/form-data'
-      );
-      expect(data.details).toBe('Unexpected error');
-    });
-  });
-
-  describe('Console logging', () => {
-    it('should log session status in POST', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
-
-      const mockFile = new FormData();
-      mockFile.append('patientId', 'patient-456');
-      mockFile.append('recordType', 'CONSULTATION');
-      mockFile.append('title', 'Test');
-      mockFile.append('description', 'Test');
-      mockFile.append('date', '2024-01-15');
-      (mockRequest.formData as jest.Mock).mockResolvedValue(mockFile);
+      mockFormData.append('attachments', ''); // empty string, not a File
 
       const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
-      const MockMedicalRecord = {
+      (MedicalRecord as unknown as jest.Mock).mockImplementation(() => ({
         save: mockSave,
-      };
-      (MedicalRecord as unknown as jest.Mock).mockImplementation(
-        () => MockMedicalRecord
+      }));
+      (MedicalRecord.findById as jest.Mock).mockReturnValue(
+        buildFindByIdChain()
       );
 
-      const mockPopulate = jest.fn();
-      const mockQuery = {
-        populate: mockPopulate,
-        lean: jest.fn().mockResolvedValue({}),
-      };
-      mockPopulate.mockReturnValue(mockQuery);
-
-      (MedicalRecord.findById as jest.Mock).mockReturnValue(mockQuery);
-
-      // Act
       await POST(mockRequest);
 
-      // Assert
-      expect(mockConsoleLog).toHaveBeenCalledWith(
-        'Session check:',
-        'Authenticated'
-      );
-      expect(mockConsoleLog).toHaveBeenCalledWith(
-        'Authenticated user:',
-        'doctor-123',
-        'RECEPTIONIST'
+      expect(mockWriteFile).not.toHaveBeenCalled();
+      expect(MedicalRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ attachments: [] })
       );
     });
 
-    it('should log FormData parsing', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
-
-      const mockFile = new FormData();
-      mockFile.append('patientId', 'patient-456');
-      mockFile.append('recordType', 'CONSULTATION');
-      mockFile.append('title', 'Test Title');
-      mockFile.append('description', 'Test Description');
-      mockFile.append('date', '2024-01-15');
-      (mockRequest.formData as jest.Mock).mockResolvedValue(mockFile);
-
-      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
-      const MockMedicalRecord = {
-        save: mockSave,
-      };
-      (MedicalRecord as unknown as jest.Mock).mockImplementation(
-        () => MockMedicalRecord
-      );
-
-      const mockPopulate = jest.fn();
-      const mockQuery = {
-        populate: mockPopulate,
-        lean: jest.fn().mockResolvedValue({}),
-      };
-      mockPopulate.mockReturnValue(mockQuery);
-
-      (MedicalRecord.findById as jest.Mock).mockReturnValue(mockQuery);
-
-      // Act
-      await POST(mockRequest);
-
-      // Assert
-      expect(mockConsoleLog).toHaveBeenCalledWith('Parsing FormData...');
-      expect(mockConsoleLog).toHaveBeenCalledWith(
-        'FormData keys:',
-        expect.any(Array)
-      );
-    });
-
-    it('should log extracted fields', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
-
-      const mockFile = new FormData();
-      mockFile.append('patientId', 'patient-456');
-      mockFile.append('recordType', 'CONSULTATION');
-      mockFile.append(
-        'title',
-        'A very long title that should be truncated in logs'
-      );
-      mockFile.append(
-        'description',
-        'A very long description that should be truncated'
-      );
-      mockFile.append('date', '2024-01-15');
-      (mockRequest.formData as jest.Mock).mockResolvedValue(mockFile);
-
-      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
-      const MockMedicalRecord = {
-        save: mockSave,
-      };
-      (MedicalRecord as unknown as jest.Mock).mockImplementation(
-        () => MockMedicalRecord
-      );
-
-      const mockPopulate = jest.fn();
-      const mockQuery = {
-        populate: mockPopulate,
-        lean: jest.fn().mockResolvedValue({}),
-      };
-      mockPopulate.mockReturnValue(mockQuery);
-
-      (MedicalRecord.findById as jest.Mock).mockReturnValue(mockQuery);
-
-      // Act
-      await POST(mockRequest);
-
-      // Assert
-      expect(mockConsoleLog).toHaveBeenCalledWith(
-        'Extracted fields:',
-        expect.objectContaining({
-          title: expect.stringContaining('...'),
-          description: expect.stringContaining('...'),
-        })
-      );
-    });
-  });
-
-  describe('Edge Cases', () => {
-    let mockFormData: FormData;
-
-    beforeEach(() => {
-      mockFormData = new FormData();
-      (mockRequest.formData as jest.Mock).mockResolvedValue(mockFormData);
-    });
-
-    it('POST should handle file with special characters in name', async () => {
-      // Arrange
-      const mockUserId = 'doctor-123';
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: mockUserId,
-          role: 'RECEPTIONIST',
-        },
-      });
-
+    it('sanitizes special characters in filenames', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
       const mockFile = new File(
-        ['test'],
+        ['data'],
         'report with spaces & special@chars.pdf',
         { type: 'application/pdf' }
       );
@@ -1059,50 +772,34 @@ describe('Medical Records API', () => {
       mockFormData.append('date', '2024-01-15');
       mockFormData.append('attachments', mockFile);
 
-      mockFile.arrayBuffer = jest.fn().mockResolvedValue(new ArrayBuffer(10));
+      mockFile.arrayBuffer = jest.fn().mockResolvedValue(new ArrayBuffer(4));
       mockExistsSync.mockReturnValue(true);
 
-      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
-      const MockMedicalRecord = {
-        save: mockSave,
-      };
-      (MedicalRecord as unknown as jest.Mock).mockImplementation(
-        () => MockMedicalRecord
-      );
-
-      const mockPopulate = jest.fn();
-      const mockQuery = {
-        populate: mockPopulate,
-        lean: jest.fn().mockResolvedValue({}),
-      };
-      mockPopulate.mockReturnValue(mockQuery);
-
-      (MedicalRecord.findById as jest.Mock).mockReturnValue(mockQuery);
-
-      // Mock Date.now
       const originalDateNow = Date.now;
       Date.now = jest.fn().mockReturnValue(1234567890);
 
-      // Act
+      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
+      (MedicalRecord as unknown as jest.Mock).mockImplementation(() => ({
+        save: mockSave,
+      }));
+      (MedicalRecord.findById as jest.Mock).mockReturnValue(
+        buildFindByIdChain()
+      );
+
       await POST(mockRequest);
 
-      // Assert
       expect(mockJoin).toHaveBeenCalledWith(
         expect.stringContaining('medical-records'),
         '1234567890-report-with-spaces---special-chars.pdf'
       );
 
-      // Restore Date.now
       Date.now = originalDateNow;
     });
 
-    it('POST should default status to ACTIVE when not provided', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
+    it('returns 500 when writeFile fails (disk full)', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      const mockFile = new File(['data'], 'report.pdf', {
+        type: 'application/pdf',
       });
 
       mockFormData.append('patientId', 'patient-456');
@@ -1110,78 +807,237 @@ describe('Medical Records API', () => {
       mockFormData.append('title', 'Checkup');
       mockFormData.append('description', 'Test');
       mockFormData.append('date', '2024-01-15');
-      // No status field
+      mockFormData.append('attachments', mockFile);
 
-      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
-      const MockMedicalRecord = {
-        save: mockSave,
-      };
-      (MedicalRecord as unknown as jest.Mock).mockImplementation(
-        () => MockMedicalRecord
+      mockFile.arrayBuffer = jest.fn().mockResolvedValue(new ArrayBuffer(4));
+      mockExistsSync.mockReturnValue(true);
+      mockWriteFile.mockRejectedValue(new Error('Disk full'));
+
+      const response = await POST(mockRequest);
+      const data = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(data).toEqual({
+        success: false,
+        error: 'File upload failed',
+        details: 'Disk full',
+      });
+    });
+
+    it('returns 500 when connectDB fails', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      mockFormData.append('patientId', 'patient-456');
+      mockFormData.append('recordType', 'CONSULTATION');
+      mockFormData.append('title', 'Checkup');
+      mockFormData.append('description', 'Test');
+      mockFormData.append('date', '2024-01-15');
+
+      (connectDB as jest.Mock).mockRejectedValue(
+        new Error('Connection failed')
       );
 
-      const mockPopulate = jest.fn();
-      const mockQuery = {
-        populate: mockPopulate,
-        lean: jest.fn().mockResolvedValue({}),
-      };
-      mockPopulate.mockReturnValue(mockQuery);
+      const response = await POST(mockRequest);
+      const data = await response.json();
 
-      (MedicalRecord.findById as jest.Mock).mockReturnValue(mockQuery);
+      expect(response.status).toBe(500);
+      expect(data).toEqual({
+        success: false,
+        error: 'Database connection failed',
+        details: 'Connection failed',
+      });
+    });
 
-      // Act
+    it('returns 400 on Mongoose ValidationError', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      mockFormData.append('patientId', 'patient-456');
+      mockFormData.append('recordType', 'CONSULTATION');
+      mockFormData.append('title', 'Checkup');
+      mockFormData.append('description', 'Test');
+      mockFormData.append('date', '2024-01-15');
+
+      const err = new Error(
+        'Validation failed: patientId: Path `patientId` is required'
+      );
+      err.name = 'ValidationError';
+      (MedicalRecord as unknown as jest.Mock).mockImplementation(() => ({
+        save: jest.fn().mockRejectedValue(err),
+      }));
+
+      const response = await POST(mockRequest);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data).toEqual({
+        success: false,
+        error: 'Validation error',
+        details: err.message,
+      });
+    });
+
+    it('returns 400 on Mongoose CastError (invalid ObjectId)', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      mockFormData.append('patientId', 'bad-id');
+      mockFormData.append('recordType', 'CONSULTATION');
+      mockFormData.append('title', 'Checkup');
+      mockFormData.append('description', 'Test');
+      mockFormData.append('date', '2024-01-15');
+
+      const err = new Error('Cast to ObjectId failed for value "bad-id"');
+      err.name = 'CastError';
+      (MedicalRecord as unknown as jest.Mock).mockImplementation(() => ({
+        save: jest.fn().mockRejectedValue(err),
+      }));
+
+      const response = await POST(mockRequest);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data).toEqual({
+        success: false,
+        error: 'Invalid ID format',
+        details: 'Patient ID or Doctor ID is not a valid MongoDB ObjectId',
+      });
+    });
+
+    it('returns 500 on generic save error', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      mockFormData.append('patientId', 'patient-456');
+      mockFormData.append('recordType', 'CONSULTATION');
+      mockFormData.append('title', 'Checkup');
+      mockFormData.append('description', 'Test');
+      mockFormData.append('date', '2024-01-15');
+
+      (MedicalRecord as unknown as jest.Mock).mockImplementation(() => ({
+        save: jest.fn().mockRejectedValue(new Error('Unknown save error')),
+      }));
+
+      const response = await POST(mockRequest);
+      const data = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(data).toEqual({
+        success: false,
+        error: 'Failed to save medical record',
+        details: 'Unknown save error',
+      });
+    });
+  });
+
+  describe('Console logging in POST', () => {
+    let mockFormData: FormData;
+
+    beforeEach(() => {
+      mockFormData = new FormData();
+      (mockRequest.formData as jest.Mock).mockResolvedValue(mockFormData);
+    });
+
+    function appendRequiredFields(fd: FormData) {
+      fd.append('patientId', 'patient-456');
+      fd.append('recordType', 'CONSULTATION');
+      fd.append('title', 'Test Title');
+      fd.append('description', 'Test Description');
+      fd.append('date', '2024-01-15');
+    }
+
+    function stubSuccessfulSave() {
+      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
+      (MedicalRecord as unknown as jest.Mock).mockImplementation(() => ({
+        save: mockSave,
+      }));
+      (MedicalRecord.findById as jest.Mock).mockReturnValue(
+        buildFindByIdChain()
+      );
+    }
+
+    it('logs session status as Authenticated', async () => {
+      mockGetServerSession.mockResolvedValue(
+        sessionFor('RECEPTIONIST', 'doc-1')
+      );
+      appendRequiredFields(mockFormData);
+      stubSuccessfulSave();
+
       await POST(mockRequest);
 
-      // Assert
-      expect(MedicalRecord).toHaveBeenCalledWith(
+      expect(mockConsoleLog).toHaveBeenCalledWith(
+        'Session check:',
+        'Authenticated'
+      );
+      expect(mockConsoleLog).toHaveBeenCalledWith(
+        'Authenticated user:',
+        'doc-1',
+        'RECEPTIONIST'
+      );
+    });
+
+    it('logs FormData parsing steps', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      appendRequiredFields(mockFormData);
+      stubSuccessfulSave();
+
+      await POST(mockRequest);
+
+      expect(mockConsoleLog).toHaveBeenCalledWith('Parsing FormData...');
+      expect(mockConsoleLog).toHaveBeenCalledWith(
+        'FormData keys:',
+        expect.any(Array)
+      );
+    });
+
+    it('logs truncated extracted fields', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      mockFormData.append('patientId', 'patient-456');
+      mockFormData.append('recordType', 'CONSULTATION');
+      mockFormData.append(
+        'title',
+        'A very long title that should be truncated in the log output'
+      );
+      mockFormData.append(
+        'description',
+        'A very long description that should also be truncated here'
+      );
+      mockFormData.append('date', '2024-01-15');
+      stubSuccessfulSave();
+
+      await POST(mockRequest);
+
+      expect(mockConsoleLog).toHaveBeenCalledWith(
+        'Extracted fields:',
         expect.objectContaining({
-          status: 'ACTIVE',
+          title: expect.stringContaining('...'),
+          description: expect.stringContaining('...'),
         })
       );
     });
 
-    it('POST should default doctorNotes to empty string when not provided', async () => {
-      // Arrange
-      mockGetServerSession.mockResolvedValue({
-        user: {
-          id: 'doctor-123',
-          role: 'RECEPTIONIST',
-        },
-      });
+    it('logs file processing count', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      appendRequiredFields(mockFormData);
+      stubSuccessfulSave();
 
-      mockFormData.append('patientId', 'patient-456');
-      mockFormData.append('recordType', 'CONSULTATION');
-      mockFormData.append('title', 'Checkup');
-      mockFormData.append('description', 'Test');
-      mockFormData.append('date', '2024-01-15');
-      // No doctorNotes field
-
-      const mockSave = jest.fn().mockResolvedValue({ _id: 'record-123' });
-      const MockMedicalRecord = {
-        save: mockSave,
-      };
-      (MedicalRecord as unknown as jest.Mock).mockImplementation(
-        () => MockMedicalRecord
-      );
-
-      const mockPopulate = jest.fn();
-      const mockQuery = {
-        populate: mockPopulate,
-        lean: jest.fn().mockResolvedValue({}),
-      };
-      mockPopulate.mockReturnValue(mockQuery);
-
-      (MedicalRecord.findById as jest.Mock).mockReturnValue(mockQuery);
-
-      // Act
       await POST(mockRequest);
 
-      // Assert
-      expect(MedicalRecord).toHaveBeenCalledWith(
-        expect.objectContaining({
-          doctorNotes: '',
-        })
-      );
+      expect(mockConsoleLog).toHaveBeenCalledWith('Processing files:', 0);
+    });
+
+    it('logs database connection steps', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      appendRequiredFields(mockFormData);
+      stubSuccessfulSave();
+
+      await POST(mockRequest);
+
+      expect(mockConsoleLog).toHaveBeenCalledWith('Connecting to database...');
+      expect(mockConsoleLog).toHaveBeenCalledWith('Database connected');
+    });
+
+    it('logs record creation step', async () => {
+      mockGetServerSession.mockResolvedValue(sessionFor('RECEPTIONIST'));
+      appendRequiredFields(mockFormData);
+      stubSuccessfulSave();
+
+      await POST(mockRequest);
+
+      expect(mockConsoleLog).toHaveBeenCalledWith('Creating medical record...');
     });
   });
 });

@@ -321,7 +321,7 @@ export default function CreateLabTestRequestPage() {
       <div className='max-w-4xl mx-auto mb-8 relative z-10'>
         <div className='flex items-center gap-4 mb-6'>
           <Link
-            href='/lab-test-requests'
+            href='/dashboard'
             className='p-3 bg-white rounded-xl shadow-lg hover:shadow-xl transition-all hover:scale-105'
           >
             <ArrowLeft className='w-6 h-6 text-gray-700' />

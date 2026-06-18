@@ -108,11 +108,7 @@ export default function NavItems({
       ],
       ADMIN: [
         { name: 'Users', href: '/admin/users', icon: FiUsers },
-        {
-          name: 'Departments',
-          href: '/departments',
-          icon: FiActivity,
-        },
+
         {
           name: 'Reports',
           href: '/records',
