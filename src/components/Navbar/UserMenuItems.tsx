@@ -18,6 +18,7 @@ import {
   FiFileText,
   FiHome,
   FiStar,
+  FiTruck,
 } from 'react-icons/fi';
 import { FaHospitalUser } from 'react-icons/fa6';
 import { BsCart4 } from 'react-icons/bs';
@@ -61,6 +62,17 @@ export default function UserMenuItems({
       },
       { name: 'Medical Records', href: '/records/patient', icon: FiFileText },
       { name: 'My Orders', href: '/my-orders', icon: BsCart4 },
+
+      {
+        name: 'deliveries',
+        href: '/patients/deliveries',
+        icon: FiTruck,
+      },
+      {
+        name: 'Pharmacy Prescriptions',
+        href: '/patient/prescription',
+        icon: FiClipboard,
+      },
     ],
     DOCTOR: [
       {
@@ -113,9 +125,14 @@ export default function UserMenuItems({
     ],
     PHARMACIST: [
       {
-        name: 'Prescriptions',
-        href: '/prescriptions',
+        name: 'patient Prescriptions',
+        href: '/pharmacist/prescriptions/patient',
         icon: FiClipboard,
+      },
+      {
+        name: 'deliveries',
+        href: '/pharmacist/prescriptions/deliveries',
+        icon: FiTruck,
       },
 
       {
